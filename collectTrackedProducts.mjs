@@ -16,16 +16,12 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const supabase = createClient(
-  SUPABASE_URL,
-  SERVICE_ROLE_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  }
-);
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+});
 
 const SUPPORTED_DOMAINS = [
   "mdcomputers.in",
@@ -35,12 +31,7 @@ const SUPPORTED_DOMAINS = [
 ];
 
 function cleanMoney(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
+  if (value === null || value === undefined) return null;
 
   const text = String(value);
 
@@ -52,19 +43,14 @@ function cleanMoney(value) {
 
   for (const match of matches) {
     const raw = match[1];
+    if (!raw) continue;
 
-    if (!raw) {
-      continue;
-    }
-
-    const price = Number(
-      raw.replace(/,/g, "")
-    );
+    const price = Number(raw.replace(/,/g, ""));
 
     if (
       Number.isFinite(price) &&
       price >= 500 &&
-      price <= 1000000
+      price <= 1_000_000
     ) {
       return Math.round(price);
     }
@@ -92,35 +78,22 @@ function getHostname(url) {
 }
 
 function isSupportedUrl(url) {
-  const hostname =
-    getHostname(url);
+  const hostname = getHostname(url);
 
   return SUPPORTED_DOMAINS.some(
     (domain) =>
       hostname === domain ||
-      hostname.endsWith(
-        `.${domain}`
-      )
+      hostname.endsWith(`.${domain}`)
   );
 }
 
-function skuAppearsExactly({
-  sku,
-  text,
-  html,
-}) {
-  const wanted =
-    normalizeSku(sku);
+function skuAppearsExactly({ sku, text, html }) {
+  const wanted = normalizeSku(sku);
 
-  if (!wanted) {
-    return false;
-  }
+  if (!wanted) return false;
 
-  const visibleText =
-    normalizeSku(text);
-
-  const pageHtml =
-    normalizeSku(html);
+  const visibleText = normalizeSku(text);
+  const pageHtml = normalizeSku(html);
 
   return (
     visibleText.includes(wanted) ||
@@ -128,31 +101,19 @@ function skuAppearsExactly({
   );
 }
 
-function detectStock(
-  text,
-  html
-) {
-  const all =
-    `${text}\n${html}`.toLowerCase();
+function detectStock(text, html) {
+  const all = `${text}\n${html}`.toLowerCase();
 
   if (
-    /availability\s*:\s*in stock/i.test(
-      text
-    ) ||
-    /availability\s+in stock/i.test(
-      text
-    )
+    /availability\s*:\s*in stock/i.test(text) ||
+    /availability\s+in stock/i.test(text)
   ) {
     return true;
   }
 
   if (
-    /availability\s*:\s*out of stock/i.test(
-      text
-    ) ||
-    /availability\s+out of stock/i.test(
-      text
-    )
+    /availability\s*:\s*out of stock/i.test(text) ||
+    /availability\s+out of stock/i.test(text)
   ) {
     return false;
   }
@@ -164,9 +125,8 @@ function detectStock(
   ];
 
   if (
-    strongInSignals.some(
-      (signal) =>
-        all.includes(signal)
+    strongInSignals.some((signal) =>
+      all.includes(signal)
     )
   ) {
     return true;
@@ -180,9 +140,8 @@ function detectStock(
   ];
 
   if (
-    strongOutSignals.some(
-      (signal) =>
-        all.includes(signal)
+    strongOutSignals.some((signal) =>
+      all.includes(signal)
     )
   ) {
     return false;
@@ -191,181 +150,100 @@ function detectStock(
   return false;
 }
 
-function isChallengePage(
-  title,
-  text
-) {
-  const titleLower =
-    String(title || "")
-      .toLowerCase();
-
-  const textLower =
-    String(text || "")
-      .toLowerCase();
+function isChallengePage(title, text) {
+  const titleLower = String(title || "").toLowerCase();
+  const textLower = String(text || "").toLowerCase();
 
   return (
-    titleLower.includes(
-      "attention required"
-    ) ||
-    titleLower.includes(
-      "just a moment"
-    ) ||
-    textLower.includes(
-      "verify you are human"
-    ) ||
-    textLower.includes(
-      "checking your browser"
-    ) ||
+    titleLower.includes("attention required") ||
+    titleLower.includes("just a moment") ||
+    textLower.includes("verify you are human") ||
+    textLower.includes("checking your browser") ||
     (
-      textLower.includes(
-        "cloudflare"
-      ) &&
+      textLower.includes("cloudflare") &&
       (
-        titleLower.includes(
-          "attention"
-        ) ||
-        titleLower.includes(
-          "challenge"
-        )
+        titleLower.includes("attention") ||
+        titleLower.includes("challenge")
       )
     )
   );
 }
 
-async function getStructuredPrice(
-  page
-) {
-  const candidates =
-    await page.evaluate(
-      () => {
-        const values = [];
+async function getStructuredPrice(page) {
+  const candidates = await page.evaluate(() => {
+    const values = [];
 
-        const push = (
-          value
-        ) => {
-          if (
-            value !== null &&
-            value !== undefined &&
-            String(
-              value
-            ).trim() !== ""
-          ) {
-            values.push(
-              String(value)
-            );
-          }
-        };
+    const push = (value) => {
+      if (
+        value !== null &&
+        value !== undefined &&
+        String(value).trim() !== ""
+      ) {
+        values.push(String(value));
+      }
+    };
 
-        const metaSelectors = [
-          'meta[property="product:price:amount"]',
-          'meta[property="og:price:amount"]',
-          'meta[itemprop="price"]',
-          'meta[name="twitter:data1"]',
-        ];
+    const metaSelectors = [
+      'meta[property="product:price:amount"]',
+      'meta[property="og:price:amount"]',
+      'meta[itemprop="price"]',
+      'meta[name="twitter:data1"]',
+    ];
 
-        for (
-          const selector
-          of metaSelectors
-        ) {
-          document
-            .querySelectorAll(
-              selector
-            )
-            .forEach(
-              (node) => {
-                push(
-                  node.getAttribute(
-                    "content"
-                  )
-                );
-              }
-            );
-        }
+    for (const selector of metaSelectors) {
+      document
+        .querySelectorAll(selector)
+        .forEach((node) => {
+          push(node.getAttribute("content"));
+        });
+    }
 
-        document
-          .querySelectorAll(
-            'script[type="application/ld+json"]'
-          )
-          .forEach(
-            (script) => {
-              try {
-                const parsed =
-                  JSON.parse(
-                    script.textContent ||
-                    "null"
-                  );
-
-                const walk = (
-                  obj
-                ) => {
-                  if (
-                    !obj ||
-                    typeof obj !==
-                      "object"
-                  ) {
-                    return;
-                  }
-
-                  if (
-                    obj.price !==
-                    undefined
-                  ) {
-                    push(
-                      obj.price
-                    );
-                  }
-
-                  if (
-                    obj.lowPrice !==
-                    undefined
-                  ) {
-                    push(
-                      obj.lowPrice
-                    );
-                  }
-
-                  if (
-                    Array.isArray(
-                      obj
-                    )
-                  ) {
-                    obj.forEach(
-                      walk
-                    );
-                  } else {
-                    Object
-                      .values(
-                        obj
-                      )
-                      .forEach(
-                        walk
-                      );
-                  }
-                };
-
-                walk(parsed);
-              } catch {
-                // ignore
-              }
-            }
+    document
+      .querySelectorAll(
+        'script[type="application/ld+json"]'
+      )
+      .forEach((script) => {
+        try {
+          const parsed = JSON.parse(
+            script.textContent || "null"
           );
 
-        return values;
-      }
-    );
+          const walk = (obj) => {
+            if (
+              !obj ||
+              typeof obj !== "object"
+            ) {
+              return;
+            }
 
-  for (
-    const candidate
-    of candidates
-  ) {
-    const price =
-      cleanMoney(
-        candidate
-      );
+            if (obj.price !== undefined) {
+              push(obj.price);
+            }
 
-    if (
-      price !== null
-    ) {
+            if (obj.lowPrice !== undefined) {
+              push(obj.lowPrice);
+            }
+
+            if (Array.isArray(obj)) {
+              obj.forEach(walk);
+            } else {
+              Object.values(obj).forEach(walk);
+            }
+          };
+
+          walk(parsed);
+        } catch {
+          // Invalid JSON-LD is ignored.
+        }
+      });
+
+    return values;
+  });
+
+  for (const candidate of candidates) {
+    const price = cleanMoney(candidate);
+
+    if (price !== null) {
       return price;
     }
   }
@@ -373,10 +251,7 @@ async function getStructuredPrice(
   return null;
 }
 
-async function getSelectorPrice(
-  page,
-  hostname
-) {
+async function getSelectorPrice(page, hostname) {
   const selectorMap = {
     "mdcomputers.in": [
       ".product-price-new",
@@ -413,122 +288,72 @@ async function getSelectorPrice(
   };
 
   const selectors =
-    selectorMap[
-      hostname
-    ] || [
+    selectorMap[hostname] || [
       "[itemprop='price']",
       ".price",
     ];
 
-  for (
-    const selector
-    of selectors
-  ) {
+  for (const selector of selectors) {
     try {
-      const values =
-        await page
-          .locator(
-            selector
-          )
-          .allTextContents();
+      const values = await page
+        .locator(selector)
+        .allTextContents();
 
-      for (
-        const value
-        of values
-      ) {
-        const price =
-          cleanMoney(
-            value
-          );
+      for (const value of values) {
+        const price = cleanMoney(value);
 
-        if (
-          price !== null
-        ) {
+        if (price !== null) {
           return price;
         }
       }
     } catch {
-      // continue
+      // Continue to next selector.
     }
   }
 
   return null;
 }
 
-async function getTextPatternPrice(
-  page,
-  hostname
-) {
+async function getTextPatternPrice(page, hostname) {
   const text = (
-    await page
-      .locator("body")
-      .innerText()
-  ).replace(
-    /\s+/g,
-    " "
-  );
+    await page.locator("body").innerText()
+  ).replace(/\s+/g, " ");
 
   const patterns =
-    hostname ===
-    "mdcomputers.in"
-
+    hostname === "mdcomputers.in"
       ? [
           /Offer Price\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
-
           /Offer Price[\s\S]{0,40}?₹\s*([\d,]+(?:\.\d{1,2})?)/i,
-
           /Special Price\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
-
           /Our Price\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
-
           /Selling Price\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
         ]
 
-      : hostname ===
-        "vedantcomputers.com"
-
+      : hostname === "vedantcomputers.com"
       ? [
           /Special Price\s*₹?\s*([\d,]+(?:\.\d{1,2})?)/i,
-
           /₹\s*([\d,]+(?:\.\d{1,2})?)\s*(?:Add to Cart|Buy Now)/i,
         ]
 
-      : hostname ===
-        "primeabgb.com"
-
+      : hostname === "primeabgb.com"
       ? [
           /₹\s*([\d,]+(?:\.\d{1,2})?)\s*(?:Add to cart|Buy now)/i,
         ]
 
-      : hostname ===
-        "computechstore.in"
-
+      : hostname === "computechstore.in"
       ? [
           /₹\s*([\d,]+(?:\.\d{1,2})?)\s*(?:Add to cart|Buy now|Save Extra)/i,
         ]
 
       : [];
 
-  for (
-    const pattern
-    of patterns
-  ) {
-    const match =
-      text.match(
-        pattern
-      );
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
 
-    if (
-      match?.[1]
-    ) {
-      const price =
-        cleanMoney(
-          match[1]
-        );
+    if (match?.[1]) {
+      const price = cleanMoney(match[1]);
 
-      if (
-        price !== null
-      ) {
+      if (price !== null) {
         return price;
       }
     }
@@ -537,18 +362,11 @@ async function getTextPatternPrice(
   return null;
 }
 
-async function detectSafePrice(
-  page,
-  hostname
-) {
+async function detectSafePrice(page, hostname) {
   const structured =
-    await getStructuredPrice(
-      page
-    );
+    await getStructuredPrice(page);
 
-  if (
-    structured !== null
-  ) {
+  if (structured !== null) {
     return structured;
   }
 
@@ -558,9 +376,7 @@ async function detectSafePrice(
       hostname
     );
 
-  if (
-    selectorPrice !== null
-  ) {
+  if (selectorPrice !== null) {
     return selectorPrice;
   }
 
@@ -575,101 +391,71 @@ async function loadTrackedSources() {
     data: links,
     error: linksError,
   } = await supabase
-    .from(
-      "product_sources"
-    )
+    .from("product_sources")
     .select(
       "id, product_id, source_id, product_url, store_sku, active"
     )
-    .eq(
-      "active",
-      true
-    )
-    .order(
-      "id",
-      {
-        ascending: true,
-      }
-    );
+    .eq("active", true)
+    .order("id", {
+      ascending: true,
+    });
 
-  if (
-    linksError
-  ) {
+  if (linksError) {
     throw linksError;
   }
 
   const {
     data: products,
-    error:
-      productsError,
+    error: productsError,
   } = await supabase
     .from("products")
     .select(
       "id, name, brand, model, category, product_role"
     );
 
-  if (
-    productsError
-  ) {
+  if (productsError) {
     throw productsError;
   }
 
   const {
     data: sources,
-    error:
-      sourcesError,
+    error: sourcesError,
   } = await supabase
     .from("sources")
     .select(
       "id, name, source_type, active"
     );
 
-  if (
-    sourcesError
-  ) {
+  if (sourcesError) {
     throw sourcesError;
   }
 
-  const productMap =
-    new Map(
-      (products || [])
-        .map(
-          (p) => [
-            p.id,
-            p,
-          ]
-        )
-    );
+  const productMap = new Map(
+    (products || []).map((p) => [
+      p.id,
+      p,
+    ])
+  );
 
-  const sourceMap =
-    new Map(
-      (sources || [])
-        .map(
-          (s) => [
-            s.id,
-            s,
-          ]
-        )
-    );
+  const sourceMap = new Map(
+    (sources || []).map((s) => [
+      s.id,
+      s,
+    ])
+  );
 
-  return (
-    links || []
-  )
-    .map(
-      (link) => ({
-        ...link,
-
-        product:
-          productMap.get(
-            link.product_id
-          ) || null,
-
-        source:
-          sourceMap.get(
-            link.source_id
-          ) || null,
-      })
-    )
+  return (links || [])
+    .map((link) => ({
+      ...link,
+      product:
+        productMap.get(
+          link.product_id
+        ) || null,
+      source:
+        sourceMap.get(
+          link.source_id
+        ) || null,
+    }))
     .filter(
       (item) =>
         item.product &&
@@ -687,113 +473,110 @@ async function recordSourceHealth(
     success = false,
   }
 ) {
-  const now =
-    new Date()
-      .toISOString();
+  const now = new Date().toISOString();
 
   const payload = {
-    last_checked_at:
-      now,
-
-    last_status:
-      status,
-
-    last_error:
-      errorMessage,
+    last_checked_at: now,
+    last_status: status,
+    last_error: errorMessage,
   };
 
-  if (
-    success
-  ) {
-    payload.last_success_at =
-      now;
-
-    payload.last_price =
-      price;
-
-    payload.last_in_stock =
-      inStock;
-
-    payload.last_error =
-      null;
+  if (success) {
+    payload.last_success_at = now;
+    payload.last_price = price;
+    payload.last_in_stock = inStock;
+    payload.last_error = null;
   }
 
-  const {
-    error,
-  } = await supabase
-    .from(
-      "product_sources"
-    )
-    .update(
-      payload
-    )
-    .eq(
-      "id",
-      productSourceId
-    );
+  const { error } = await supabase
+    .from("product_sources")
+    .update(payload)
+    .eq("id", productSourceId);
 
-  if (
-    error
-  ) {
+  if (error) {
     console.log(
       `⚠️ Could not update source health for product_sources.id=${productSourceId}: ${error.message}`
     );
   }
 }
 
-async function savePrice({
+async function savePriceIfChanged({
   productId,
   sourceId,
   sourceName,
   price,
   inStock,
 }) {
-  const {
-    error,
-  } = await supabase
-    .from(
-      "price_history"
-    )
+  const { data: latestRows, error: latestError } = await supabase
+    .from("price_history")
+    .select("id, price, in_stock, captured_at")
+    .eq("product_id", productId)
+    .eq("source_type", "online")
+    .eq("source_id", sourceId)
+    .order("captured_at", { ascending: false })
+    .limit(1);
+
+  if (latestError) {
+    throw latestError;
+  }
+
+  const latest = latestRows?.[0] || null;
+
+  const latestPrice =
+    latest
+      ? Number(latest.price)
+      : null;
+
+  const latestStock =
+    latest
+      ? Boolean(latest.in_stock)
+      : null;
+
+  const priceChanged =
+    latestPrice === null ||
+    latestPrice !== Number(price);
+
+  const stockChanged =
+    latestStock === null ||
+    latestStock !== Boolean(inStock);
+
+  if (!priceChanged && !stockChanged) {
+    return {
+      inserted: false,
+      reason: "unchanged",
+      latest,
+    };
+  }
+
+  const { error } = await supabase
+    .from("price_history")
     .insert({
-      product_id:
-        productId,
-
-      source_type:
-        "online",
-
-      source_name:
-        sourceName,
-
-      source_id:
-        sourceId,
-
+      product_id: productId,
+      source_type: "online",
+      source_name: sourceName,
+      source_id: sourceId,
       price,
-
-      in_stock:
-        inStock,
-
-      match_confidence:
-        "exact_sku",
+      in_stock: inStock,
+      match_confidence: "exact_sku",
     });
 
-  if (
-    error
-  ) {
+  if (error) {
     throw error;
   }
+
+  return {
+    inserted: true,
+    reason:
+      latest
+        ? "changed"
+        : "first_observation",
+    latest,
+  };
 }
 
-async function collectOne(
-  page,
-  item
-) {
-  const url =
-    item.product_url;
-
-  const hostname =
-    getHostname(
-      url
-    );
+async function collectOne(page, item) {
+  const url = item.product_url;
+  const hostname = getHostname(url);
 
   const expectedSku =
     item.store_sku ||
@@ -817,22 +600,15 @@ async function collectOne(
 
   console.log(
     `🏷️ Expected SKU: ${
-      expectedSku ||
-      "MISSING"
+      expectedSku || "MISSING"
     }`
   );
 
-  if (
-    !isSupportedUrl(
-      url
-    )
-  ) {
+  if (!isSupportedUrl(url)) {
     await recordSourceHealth(
       item.id,
       {
-        status:
-          "unsupported_domain",
-
+        status: "unsupported_domain",
         errorMessage:
           "Unsupported store domain",
       }
@@ -843,20 +619,15 @@ async function collectOne(
     );
 
     return {
-      status:
-        "skipped",
+      status: "skipped",
     };
   }
 
-  if (
-    !expectedSku
-  ) {
+  if (!expectedSku) {
     await recordSourceHealth(
       item.id,
       {
-        status:
-          "error",
-
+        status: "error",
         errorMessage:
           "Missing exact SKU/model",
       }
@@ -867,32 +638,19 @@ async function collectOne(
     );
 
     return {
-      status:
-        "skipped",
+      status: "skipped",
     };
   }
 
   try {
-    await page.goto(
-      url,
-      {
-        waitUntil:
-          "domcontentloaded",
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 45_000,
+    });
 
-        timeout:
-          45000,
-      }
-    );
+    await page.waitForTimeout(5000);
 
-    await page
-      .waitForTimeout(
-        5000
-      );
-
-    if (
-      hostname ===
-      "mdcomputers.in"
-    ) {
+    if (hostname === "mdcomputers.in") {
       await page
         .waitForFunction(
           () =>
@@ -902,54 +660,36 @@ async function collectOne(
             document.body.innerText.includes(
               "Availability"
             ),
-
           {
-            timeout:
-              10000,
+            timeout: 10_000,
           }
         )
-        .catch(
-          () => {}
-        );
+        .catch(() => {});
     }
 
     const title =
       await page
         .title()
-        .catch(
-          () => ""
-        );
+        .catch(() => "");
 
     const text =
       await page
-        .locator(
-          "body"
-        )
+        .locator("body")
         .innerText()
-        .catch(
-          () => ""
-        );
+        .catch(() => "");
 
     const html =
-      await page
-        .content();
+      await page.content();
 
-    if (
-      isChallengePage(
-        title,
-        text
-      )
-    ) {
+    if (isChallengePage(title, text)) {
       await recordSourceHealth(
         item.id,
         {
           status:
             "cloudflare_blocked",
-
           errorMessage:
             `Challenge page: ${
-              title ||
-              "Cloudflare"
+              title || "Cloudflare"
             }`,
         }
       );
@@ -959,29 +699,21 @@ async function collectOne(
       );
 
       return {
-        status:
-          "skipped",
+        status: "skipped",
       };
     }
 
     if (
-      !skuAppearsExactly(
-        {
-          sku:
-            expectedSku,
-
-          text,
-
-          html,
-        }
-      )
+      !skuAppearsExactly({
+        sku: expectedSku,
+        text,
+        html,
+      })
     ) {
       await recordSourceHealth(
         item.id,
         {
-          status:
-            "sku_mismatch",
-
+          status: "sku_mismatch",
           errorMessage:
             `Exact SKU ${expectedSku} not found on loaded page`,
         }
@@ -996,8 +728,7 @@ async function collectOne(
       );
 
       return {
-        status:
-          "skipped",
+        status: "skipped",
       };
     }
 
@@ -1013,15 +744,12 @@ async function collectOne(
         html
       );
 
-    if (
-      price === null
-    ) {
+    if (price === null) {
       await recordSourceHealth(
         item.id,
         {
           status:
             "price_not_detected",
-
           errorMessage:
             "Exact SKU verified but price was not safely detected",
         }
@@ -1032,70 +760,79 @@ async function collectOne(
       );
 
       return {
-        status:
-          "skipped",
+        status: "skipped",
       };
     }
 
-    await savePrice({
-      productId:
-        item.product_id,
+    const historyResult =
+      await savePriceIfChanged({
+        productId:
+          item.product_id,
 
-      sourceId:
-        item.source_id,
+        sourceId:
+          item.source_id,
 
-      sourceName:
-        item.source.name,
-
-      price,
-
-      inStock,
-    });
-
-    await recordSourceHealth(
-      item.id,
-      {
-        status:
-          "success",
-
-        success:
-          true,
+        sourceName:
+          item.source.name,
 
         price,
 
         inStock,
+      });
+
+    await recordSourceHealth(
+      item.id,
+      {
+        status: "success",
+        success: true,
+        price,
+        inStock,
       }
     );
 
+    if (historyResult.inserted) {
+      console.log(
+        `✅ HISTORY SAVED: ₹${price.toLocaleString(
+          "en-IN"
+        )} • ${
+          inStock
+            ? "In stock"
+            : "Out/unclear"
+        } • ${
+          historyResult.reason ===
+          "first_observation"
+            ? "first observation"
+            : "price/stock changed"
+        }`
+      );
+
+      return {
+        status: "saved",
+      };
+    }
+
     console.log(
-      `✅ SAVED: ₹${price.toLocaleString(
+      `🟰 UNCHANGED: ₹${price.toLocaleString(
         "en-IN"
       )} • ${
         inStock
           ? "In stock"
           : "Out/unclear"
-      }`
+      } • health refreshed, history not duplicated`
     );
 
     return {
-      status:
-        "saved",
+      status: "unchanged",
     };
-  } catch (
-    error
-  ) {
+  } catch (error) {
     const message =
       error?.message ||
-      String(
-        error
-      );
+      String(error);
 
     await recordSourceHealth(
       item.id,
       {
-        status:
-          "error",
-
+        status: "error",
         errorMessage:
           message.slice(
             0,
@@ -1109,8 +846,7 @@ async function collectOne(
     );
 
     return {
-      status:
-        "error",
+      status: "error",
     };
   }
 }
@@ -1127,9 +863,7 @@ async function main() {
   const items =
     await loadTrackedSources();
 
-  if (
-    items.length === 0
-  ) {
+  if (items.length === 0) {
     console.log(
       "No active product_sources found."
     );
@@ -1143,66 +877,48 @@ async function main() {
 
   const browser =
     await chromium.launch({
-      headless:
-        true,
+      headless: true,
     });
 
   const context =
-    await browser
-      .newContext({
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36",
+    await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36",
 
-        viewport: {
-          width:
-            1440,
+      viewport: {
+        width: 1440,
+        height: 1000,
+      },
 
-          height:
-            1000,
-        },
-
-        locale:
-          "en-IN",
-      });
+      locale: "en-IN",
+    });
 
   const page =
-    await context
-      .newPage();
+    await context.newPage();
 
   const summary = {
-    saved:
-      0,
-
-    skipped:
-      0,
-
-    error:
-      0,
+    saved: 0,
+    unchanged: 0,
+    skipped: 0,
+    error: 0,
   };
 
   try {
-    for (
-      const item
-      of items
-    ) {
+    for (const item of items) {
       const result =
         await collectOne(
           page,
           item
         );
 
-      summary[
-        result.status
-      ] += 1;
+      summary[result.status] += 1;
 
-      await page
-        .waitForTimeout(
-          1200
-        );
+      await page.waitForTimeout(
+        1200
+      );
     }
   } finally {
-    await browser
-      .close();
+    await browser.close();
   }
 
   console.log(
@@ -1214,7 +930,11 @@ async function main() {
   );
 
   console.log(
-    `✅ Saved: ${summary.saved}`
+    `✅ History rows saved: ${summary.saved}`
+  );
+
+  console.log(
+    `🟰 Unchanged (health only): ${summary.unchanged}`
   );
 
   console.log(
@@ -1230,19 +950,12 @@ async function main() {
   );
 }
 
-main()
-  .catch(
-    (error) => {
-      console.error(
-        "\n💥 Fatal collector error:"
-      );
-
-      console.error(
-        error
-      );
-
-      process.exit(
-        1
-      );
-    }
+main().catch((error) => {
+  console.error(
+    "\n💥 Fatal collector error:"
   );
+
+  console.error(error);
+
+  process.exit(1);
+});
