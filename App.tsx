@@ -24,6 +24,7 @@ import {
   RefreshControl,
   Share,
   Alert,
+  Linking,
 } from "react-native";
 
 import { LineChart } from "react-native-chart-kit";
@@ -325,6 +326,27 @@ type StorePrice = {
   price: number;
 };
 
+type SourceHealthStatus =
+  | "success"
+  | "cloudflare_blocked"
+  | "sku_mismatch"
+  | "price_not_detected"
+  | "unsupported_domain"
+  | "error"
+  | null;
+
+type SourceHealth = {
+  id: number;
+  source: string;
+  productUrl: string;
+  lastStatus: SourceHealthStatus;
+  lastPrice: number | null;
+  lastInStock: boolean | null;
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+};
+
 type DisplayProduct = Product & {
   onlinePrice: number | null;
   localPrice: number | null;
@@ -332,6 +354,8 @@ type DisplayProduct = Product & {
   localSource: string | null;
   onlineStores: StorePrice[];
   localStores: StorePrice[];
+  trackingSources: SourceHealth[];
+  healthCheckedAt: string | null;
   updatedAt: string | null;
   localMatchConfidence:
   | "exact_sku"
@@ -362,9 +386,53 @@ function formatRelativeTime(value: string | null) {
   return `Updated ${days}d ago`;
 }
 
+function formatSourceHealthStatus(status: SourceHealthStatus) {
+  switch (status) {
+    case "success":
+      return "Healthy";
+
+    case "cloudflare_blocked":
+      return "Cloudflare blocked";
+
+    case "sku_mismatch":
+      return "SKU mismatch";
+
+    case "price_not_detected":
+      return "Price not detected";
+
+    case "unsupported_domain":
+      return "Unsupported store";
+
+    case "error":
+      return "Collector error";
+
+    default:
+      return "Pending first check";
+  }
+}
+
+function sourceHealthTone(status: SourceHealthStatus) {
+  if (status === "success") {
+    return "healthy";
+  }
+
+  if (
+    status === "cloudflare_blocked" ||
+    status === "price_not_detected"
+  ) {
+    return "warning";
+  }
+
+  return "error";
+}
+
 function isStale(value: string | null, hours = 24) {
   if (!value) return true;
   return Date.now() - new Date(value).getTime() > hours * 60 * 60 * 1000;
+}
+
+function getProductHealthTimestamp(product: DisplayProduct) {
+  return product.healthCheckedAt || product.updatedAt;
 }
 
 function getBestComparablePrice(product: DisplayProduct) {
@@ -409,7 +477,7 @@ const difference =
       : "Same"
     : null;
 
-  const stale = isStale(item.updatedAt);
+  const stale = isStale(getProductHealthTimestamp(item));
 
   return (
     <Pressable
@@ -510,7 +578,7 @@ const difference =
       </View>
 
       <Text style={styles.updatedText}>
-        {formatRelativeTime(item.updatedAt)}
+        {formatRelativeTime(getProductHealthTimestamp(item))}
       </Text>
       </Pressable>
   );
@@ -545,6 +613,20 @@ function useProducts() {
         throw sourceError;
       }
 
+      const {
+  data: productSourceData,
+  error: productSourceError,
+} = await supabase
+  .from("product_sources")
+  .select(
+    "id, product_id, source_id, product_url, active, last_status, last_price, last_in_stock, last_checked_at, last_success_at, last_error"
+  )
+  .eq("active", true);
+
+if (productSourceError) {
+  throw productSourceError;
+}
+
       const { data: priceData, error: priceError } =
         await supabase
           .from("price_history")
@@ -558,6 +640,7 @@ function useProducts() {
       const productsList = (productData || []) as Product[];
       const pricesList = (priceData || []) as PriceHistory[];
       const sourcesList = sourceData || [];
+      const productSourcesList = productSourceData || [];
 
       const getSourceName = (sourceId: number | null) => {
         if (!sourceId) return null;
@@ -640,6 +723,62 @@ const localStores: StorePrice[] = localPrices.map((price) => ({
   price: Number(price.price),
 }));
 
+const trackingSources: SourceHealth[] = productSourcesList
+  .filter(
+    (item: any) =>
+      Number(item.product_id) === Number(product.id)
+  )
+
+  .map((item: any) => ({
+    id: Number(item.id),
+
+    source:
+      getSourceName(item.source_id) ||
+      "Unknown source",
+
+    productUrl:
+      item.product_url || "",
+
+    lastStatus:
+      item.last_status || null,
+
+    lastPrice:
+      item.last_price !== null
+        ? Number(item.last_price)
+        : null,
+
+    lastInStock:
+      item.last_in_stock ?? null,
+
+    lastCheckedAt:
+      item.last_checked_at || null,
+
+    lastSuccessAt:
+      item.last_success_at || null,
+
+    lastError:
+      item.last_error || null,
+  }))
+  .sort((a, b) =>
+    a.source.localeCompare(b.source)
+  );
+
+const healthCheckedAt =
+  trackingSources
+    .map(
+      (item) =>
+        item.lastCheckedAt
+    )
+    .filter(
+      (value): value is string =>
+        Boolean(value)
+    )
+    .sort(
+      (a, b) =>
+        new Date(b).getTime() -
+        new Date(a).getTime()
+    )[0] || null;
+
 return {
   ...product,
 
@@ -667,8 +806,10 @@ return {
   ? bestLocal.match_confidence
   : null,  
 
-  onlineStores,
-  localStores,
+ onlineStores,
+localStores,
+trackingSources,
+healthCheckedAt,
 };
 });
       setProducts(finalProducts);
@@ -884,7 +1025,7 @@ function HomeScreen({ navigation }: any) {
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .sort((a, b) => b.saving - a.saving);
 
-  const staleCount = trackedProducts.filter((item) => isStale(item.updatedAt)).length;
+  const staleCount = trackedProducts.filter((item) => isStale(getProductHealthTimestamp(item))).length;
 
   let visibleProducts = trackedProducts.filter((item) => {
     const q = searchQuery.trim().toLowerCase();
@@ -1373,6 +1514,8 @@ function ProductDetailScreen({ route }: any) {
 
   const [history, setHistory] = useState<any[]>([]);
   const [range, setRange] = useState<"7D" | "30D" | "ALL">("7D");
+  const [sourceHealth, setSourceHealth] = useState<SourceHealth[]>(product.trackingSources || []);
+  const [sourceHealthError, setSourceHealthError] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [targetPrice, setTargetPrice] = useState("");
@@ -1395,6 +1538,66 @@ function ProductDetailScreen({ route }: any) {
     if (!silent) setLoading(false);
   }
 
+async function loadSourceHealth() {
+  setSourceHealthError("");
+
+  const { data: sourceRows, error: sourceRowsError } =
+    await supabase
+      .from("product_sources")
+      .select(
+        "id, product_id, source_id, product_url, active, last_status, last_price, last_in_stock, last_checked_at, last_success_at, last_error"
+      )
+      .eq("product_id", Number(product.id))
+      .eq("active", true)
+      .order("id", { ascending: true });
+
+  if (sourceRowsError) {
+    console.log("Source health error:", sourceRowsError);
+    setSourceHealthError(sourceRowsError.message || "Could not load tracking health");
+    return;
+  }
+
+  const { data: sourceData, error: sourceError } =
+    await supabase
+      .from("sources")
+      .select("id, name");
+
+  if (sourceError) {
+    console.log("Sources error:", sourceError);
+    setSourceHealthError(sourceError.message || "Could not load store names");
+    return;
+  }
+
+  const rows: SourceHealth[] = (sourceRows || [])
+    .map((item: any) => {
+      const source = (sourceData || []).find(
+        (s: any) => Number(s.id) === Number(item.source_id)
+      );
+
+      return {
+        id: Number(item.id),
+        source: source?.name || "Unknown source",
+        productUrl: item.product_url || "",
+        lastStatus: item.last_status || null,
+        lastPrice:
+          item.last_price !== null ? Number(item.last_price) : null,
+        lastInStock: item.last_in_stock ?? null,
+        lastCheckedAt: item.last_checked_at || null,
+        lastSuccessAt: item.last_success_at || null,
+        lastError: item.last_error || null,
+      };
+    })
+    .sort((a, b) => {
+      const rank = (status: SourceHealthStatus) =>
+        status === "success" ? 0 : status === "cloudflare_blocked" ? 1 : 2;
+      const rankDiff = rank(a.lastStatus) - rank(b.lastStatus);
+      return rankDiff !== 0 ? rankDiff : a.source.localeCompare(b.source);
+    });
+
+  setSourceHealth(rows);
+}
+
+
   async function loadExistingTarget() {
     const { data, error } = await supabase
       .from("watchlist")
@@ -1416,10 +1619,11 @@ function ProductDetailScreen({ route }: any) {
     }
   }
 
-  useEffect(() => {
-    void loadHistory();
-    void loadExistingTarget();
-  }, [product.id]);
+useEffect(() => {
+  void loadHistory();
+  void loadExistingTarget();
+  void loadSourceHealth();
+}, [product.id]);
 
   const now = new Date();
   const filteredHistory = history.filter((item) => {
@@ -1489,9 +1693,43 @@ function ProductDetailScreen({ route }: any) {
       ? current - parsedTarget
       : null;
 
+  const detailHealthCheckedAt =
+    sourceHealth
+      .map((item) => item.lastCheckedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort(
+        (a, b) => new Date(b).getTime() - new Date(a).getTime()
+      )[0] ||
+    product.healthCheckedAt ||
+    product.updatedAt;
+
+  const healthySourceCount = sourceHealth.filter(
+    (item) => item.lastStatus === "success"
+  ).length;
+  const attentionSourceCount = sourceHealth.filter(
+    (item) => item.lastStatus !== "success"
+  ).length;
+  const detailHealthStale = isStale(detailHealthCheckedAt);
+
+  async function openTrackedStore(url: string) {
+    if (!url) return;
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      }
+    } catch (error) {
+      console.log("Open store error:", error);
+    }
+  }
+
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([loadHistory(true), loadExistingTarget()]);
+   await Promise.all([
+  loadHistory(true),
+  loadExistingTarget(),
+  loadSourceHealth(),
+]);
     setRefreshing(false);
   }
 
@@ -1558,10 +1796,14 @@ function ProductDetailScreen({ route }: any) {
             </View>
             <View style={styles.intelligenceItem}>
               <Text style={styles.priceLabel}>Data health</Text>
-              <Text style={[styles.intelligenceValue, isStale(product.updatedAt) && styles.priceUp]}>
-                {isStale(product.updatedAt) ? "STALE" : "FRESH"}
+              <Text style={[styles.intelligenceValue, detailHealthStale && styles.priceUp]}>
+                {detailHealthStale ? "STALE" : "FRESH"}
               </Text>
-              <Text style={styles.intelligenceMeta}>{formatRelativeTime(product.updatedAt)}</Text>
+              <Text style={styles.intelligenceMeta}>
+                {sourceHealth.length > 0
+                  ? `${healthySourceCount}/${sourceHealth.length} stores healthy • ${formatRelativeTime(detailHealthCheckedAt)}`
+                  : formatRelativeTime(detailHealthCheckedAt)}
+              </Text>
             </View>
           </View>
         </View>
@@ -1646,6 +1888,213 @@ function ProductDetailScreen({ route }: any) {
             <Text style={styles.storePrice}>{formatPrice(store.price)}</Text>
           </View>
         ))}
+
+
+
+        {sourceHealthError !== "" && sourceHealth.length === 0 && (
+          <View style={styles.sourceHealthErrorCard}>
+            <Ionicons name="warning-outline" size={16} color="#F5B942" />
+            <Text style={styles.sourceHealthErrorText}>
+              Tracking health temporarily unavailable. Pull down to retry.
+            </Text>
+          </View>
+        )}
+
+        {sourceHealth.length > 0 && (
+  <View style={styles.sourceHealthCard}>
+    <View style={styles.sourceHealthHeader}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.sectionTitle}>
+          Tracking Health
+        </Text>
+
+
+        <Text style={styles.sourceHealthSubtitle}>
+          Collector status for every tracked store
+        </Text>
+        <View style={styles.sourceHealthSummaryRow}>
+          <View style={styles.healthSummaryPill}>
+            <Text style={styles.healthSummaryHealthy}>
+              {healthySourceCount} healthy
+            </Text>
+          </View>
+          {attentionSourceCount > 0 && (
+            <View style={[styles.healthSummaryPill, styles.healthSummaryPillWarning]}>
+              <Text style={styles.healthSummaryWarning}>
+                {attentionSourceCount} attention
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      <Ionicons
+        name="pulse-outline"
+        size={20}
+        color="#35D07F"
+      />
+    </View>
+
+    {sourceHealth.map((source) => {
+      const tone =
+        sourceHealthTone(
+          source.lastStatus
+        );
+
+      const badgeStyle =
+        tone === "healthy"
+          ? styles.sourceHealthBadgeHealthy
+          : tone === "warning"
+          ? styles.sourceHealthBadgeWarning
+          : styles.sourceHealthBadgeError;
+
+      const textStyle =
+        tone === "healthy"
+          ? styles.sourceHealthTextHealthy
+          : tone === "warning"
+          ? styles.sourceHealthTextWarning
+          : styles.sourceHealthTextError;
+
+      return (
+        <View
+          key={`health-${source.id}`}
+          style={styles.sourceHealthRow}
+        >
+          <View style={styles.sourceHealthLeft}>
+            <Text style={styles.storeName}>
+              {source.source}
+            </Text>
+
+            <Text style={styles.sourceHealthMeta}>
+              {source.lastCheckedAt
+                ? formatRelativeTime(
+                    source.lastCheckedAt
+                  )
+                : "Waiting for first collector run"}
+            </Text>
+
+            {source.lastStatus !== "success" && source.lastSuccessAt && (
+              <Text style={styles.sourceHealthLastSuccess}>
+                Last verified {formatRelativeTime(source.lastSuccessAt).replace("Updated ", "")}
+              </Text>
+            )}
+
+            {source.lastStatus ===
+              "cloudflare_blocked" && (
+              <Text
+                style={
+                  styles.sourceHealthReason
+                }
+              >
+                Store protection blocked this
+                check. Previous verified prices
+                stay intact.
+              </Text>
+            )}
+
+            {source.lastStatus ===
+              "sku_mismatch" && (
+              <Text
+                style={
+                  styles.sourceHealthReason
+                }
+              >
+                Exact SKU was not found, so no
+                price was saved.
+              </Text>
+            )}
+
+            {source.lastStatus ===
+              "price_not_detected" && (
+              <Text
+                style={
+                  styles.sourceHealthReason
+                }
+              >
+                SKU matched, but price could not
+                be safely verified.
+              </Text>
+            )}
+
+            {source.lastStatus === "error" && (
+              <Text style={styles.sourceHealthReason}>
+                Collector hit an unexpected error. Existing verified price is preserved.
+              </Text>
+            )}
+
+            {source.lastStatus === "unsupported_domain" && (
+              <Text style={styles.sourceHealthReason}>
+                This store is not supported by the current collector.
+              </Text>
+            )}
+
+            {source.lastStatus === null && (
+              <Text style={styles.sourceHealthReason}>
+                Waiting for the first scheduled collector check.
+              </Text>
+            )}
+
+            {source.productUrl !== "" && (
+              <Pressable
+                style={styles.openStoreButton}
+                onPress={() => void openTrackedStore(source.productUrl)}
+              >
+                <Ionicons name="open-outline" size={12} color="#8B95A7" />
+                <Text style={styles.openStoreButtonText}>Open store</Text>
+              </Pressable>
+            )}
+          </View>
+
+          <View style={styles.sourceHealthRight}>
+            <View
+              style={[
+                styles.sourceHealthBadge,
+                badgeStyle,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.sourceHealthBadgeText,
+                  textStyle,
+                ]}
+              >
+                {formatSourceHealthStatus(
+                  source.lastStatus
+                )}
+              </Text>
+            </View>
+
+            {source.lastPrice !== null && (
+              <Text
+                style={
+                  styles.sourceHealthPrice
+                }
+              >
+                {formatPrice(
+                  source.lastPrice
+                )}
+              </Text>
+            )}
+
+            {source.lastStatus ===
+              "success" &&
+              source.lastInStock !== null && (
+                <Text
+                  style={
+                    styles.sourceHealthStock
+                  }
+                >
+                  {source.lastInStock
+                    ? "In stock"
+                    : "Out / unclear"}
+                </Text>
+              )}
+          </View>
+        </View>
+      );
+    })}
+  </View>
+)}
 
         {(product.localStores || []).length > 0 && (
           <>
@@ -3898,4 +4347,175 @@ modalDismissText: {
     textAlign: "center",
     marginTop: 10,
   },
+  sourceHealthSummaryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  healthSummaryPill: {
+    backgroundColor: "#11271C",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#24583B",
+  },
+  healthSummaryPillWarning: {
+    backgroundColor: "#2A2312",
+    borderColor: "#665021",
+  },
+  healthSummaryHealthy: {
+    color: "#35D07F",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  healthSummaryWarning: {
+    color: "#F5B942",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  sourceHealthLastSuccess: {
+    color: "#657186",
+    fontSize: 9,
+    marginTop: 3,
+  },
+  openStoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    marginTop: 8,
+    paddingVertical: 4,
+  },
+  openStoreButtonText: {
+    color: "#8B95A7",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  sourceHealthErrorCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#2A2312",
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 12,
+    borderWidth: 1,
+    borderColor: "#665021",
+  },
+  sourceHealthErrorText: {
+    flex: 1,
+    color: "#D9C38B",
+    fontSize: 11,
+    lineHeight: 16,
+  },
+
+  sourceHealthCard: {
+  backgroundColor: "#151B26",
+  borderRadius: 16,
+  padding: 14,
+  marginTop: 18,
+  marginBottom: 18,
+  borderWidth: 1,
+  borderColor: "#222B39",
+},
+
+sourceHealthHeader: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 4,
+},
+
+sourceHealthSubtitle: {
+  color: "#657186",
+  fontSize: 11,
+  marginTop: -8,
+  marginBottom: 8,
+},
+
+sourceHealthRow: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 12,
+  paddingVertical: 13,
+  borderTopWidth: 1,
+  borderTopColor: "#222B39",
+},
+
+sourceHealthLeft: {
+  flex: 1,
+},
+
+sourceHealthRight: {
+  alignItems: "flex-end",
+  maxWidth: "46%",
+},
+
+sourceHealthMeta: {
+  color: "#7E899A",
+  fontSize: 10,
+  marginTop: 4,
+},
+
+sourceHealthReason: {
+  color: "#8B95A7",
+  fontSize: 10,
+  lineHeight: 15,
+  marginTop: 5,
+},
+
+sourceHealthBadge: {
+  borderRadius: 999,
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+  borderWidth: 1,
+},
+
+sourceHealthBadgeHealthy: {
+  backgroundColor: "#11271C",
+  borderColor: "#24583B",
+},
+
+sourceHealthBadgeWarning: {
+  backgroundColor: "#2A2312",
+  borderColor: "#665021",
+},
+
+sourceHealthBadgeError: {
+  backgroundColor: "#2A1717",
+  borderColor: "#623131",
+},
+
+sourceHealthBadgeText: {
+  fontSize: 10,
+  fontWeight: "800",
+},
+
+sourceHealthTextHealthy: {
+  color: "#35D07F",
+},
+
+sourceHealthTextWarning: {
+  color: "#F5B942",
+},
+
+sourceHealthTextError: {
+  color: "#FF6B6B",
+},
+
+sourceHealthPrice: {
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontWeight: "800",
+  marginTop: 7,
+},
+
+sourceHealthStock: {
+  color: "#7E899A",
+  fontSize: 10,
+  marginTop: 2,
+},
 });
